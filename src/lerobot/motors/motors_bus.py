@@ -350,6 +350,8 @@ class SerialMotorsBus(MotorsBusBase):
     model_number_table: dict[str, int]
     model_resolution_table: dict[str, int]
     normalized_data: list[str]
+    supports_homing_offset: bool = True
+    supports_sync_read: bool = True
 
     def __init__(
         self,
@@ -788,6 +790,9 @@ class SerialMotorsBus(MotorsBusBase):
         """
         motor_names = self._get_motors_list(motors)
 
+        if not self.supports_homing_offset:
+            return {motor: 0 for motor in motor_names}
+
         self.reset_calibration(motor_names)
         actual_positions = self.sync_read("Present_Position", motor_names, normalize=False)
         homing_offsets = self._get_half_turn_homings(actual_positions)
@@ -819,13 +824,21 @@ class SerialMotorsBus(MotorsBusBase):
         """
         motor_names = self._get_motors_list(motors)
 
-        start_positions = self.sync_read("Present_Position", motor_names, normalize=False, num_retry=5)
+        def read_positions() -> dict[str, Value]:
+            if self.supports_sync_read:
+                return self.sync_read("Present_Position", motor_names, normalize=False, num_retry=5)
+            return {
+                motor: self.read("Present_Position", motor, normalize=False, num_retry=5)
+                for motor in motor_names
+            }
+
+        start_positions = read_positions()
         mins = start_positions.copy()
         maxes = start_positions.copy()
 
         user_pressed_enter = False
         while not user_pressed_enter:
-            positions = self.sync_read("Present_Position", motor_names, normalize=False, num_retry=5)
+            positions = read_positions()
             mins = {motor: min(positions[motor], min_) for motor, min_ in mins.items()}
             maxes = {motor: max(positions[motor], max_) for motor, max_ in maxes.items()}
 

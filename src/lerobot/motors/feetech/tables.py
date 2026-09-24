@@ -127,6 +127,7 @@ SCS_SERIES_CONTROL_TABLE = {
     "CCW_Dead_Zone": (27, 1),
     "Protective_Torque": (37, 1),
     "Protection_Time": (38, 1),
+    "Overload_Torque": (39, 1),
     # SRAM
     "Torque_Enable": (40, 1),
     "Acceleration": (41, 1),
@@ -151,6 +152,14 @@ SCS_SERIES_CONTROL_TABLE = {
     "Acceleration_2": (83, 1),  # don't know what that is
 }
 
+# The current SCS215 manual leaves addresses 7, 23, and 41 undefined. Keep a
+# model-specific table so generic SCS models can retain their existing entries.
+SCS215_CONTROL_TABLE = {
+    data_name: data_spec
+    for data_name, data_spec in SCS_SERIES_CONTROL_TABLE.items()
+    if data_name not in {"Return_Delay_Time", "I_Coefficient", "Acceleration"}
+}
+
 STS_SMS_SERIES_BAUDRATE_TABLE = {
     1_000_000: 0,
     500_000: 1,
@@ -168,9 +177,9 @@ SCS_SERIES_BAUDRATE_TABLE = {
     250_000: 2,
     128_000: 3,
     115_200: 4,
-    57_600: 5,
-    38_400: 6,
-    19_200: 7,
+    76_800: 5,
+    57_600: 6,
+    38_400: 7,
 }
 
 MODEL_CONTROL_TABLE = {
@@ -180,6 +189,7 @@ MODEL_CONTROL_TABLE = {
     "sts3215": STS_SMS_SERIES_CONTROL_TABLE,
     "sts3250": STS_SMS_SERIES_CONTROL_TABLE,
     "scs0009": SCS_SERIES_CONTROL_TABLE,
+    "scs215": SCS215_CONTROL_TABLE,
     "sm8512bl": STS_SMS_SERIES_CONTROL_TABLE,
 }
 
@@ -191,6 +201,7 @@ MODEL_RESOLUTION = {
     "sts3250": 4096,
     "sm8512bl": 4096,
     "scs0009": 1024,
+    "scs215": 1024,
 }
 
 MODEL_BAUDRATE_TABLE = {
@@ -201,6 +212,7 @@ MODEL_BAUDRATE_TABLE = {
     "sts3215": STS_SMS_SERIES_BAUDRATE_TABLE,
     "sts3250": STS_SMS_SERIES_BAUDRATE_TABLE,
     "scs0009": SCS_SERIES_BAUDRATE_TABLE,
+    "scs215": SCS_SERIES_BAUDRATE_TABLE,
 }
 
 # Sign-Magnitude encoding bits
@@ -218,11 +230,12 @@ STS_SMS_SERIES_ENCODINGS_TABLE = {
 MODEL_ENCODING_TABLE = {
     "sts_series": STS_SMS_SERIES_ENCODINGS_TABLE,
     "sms_series": STS_SMS_SERIES_ENCODINGS_TABLE,
-    "scs_series": {},
+    "scs_series": {"Present_Load": 10},
     "sts3215": STS_SMS_SERIES_ENCODINGS_TABLE,
     "sts3250": STS_SMS_SERIES_ENCODINGS_TABLE,
     "sm8512bl": STS_SMS_SERIES_ENCODINGS_TABLE,
-    "scs0009": {},
+    "scs0009": {"Present_Load": 10},
+    "scs215": {"Present_Load": 10},
 }
 
 SCAN_BAUDRATES = [
@@ -244,6 +257,8 @@ MODEL_NUMBER_TABLE = {
     "sts3250": 2825,
     "sm8512bl": 11272,
     "scs0009": 1284,
+    # The connected SCS215 reports model number 1315 under SCS protocol 1.
+    "scs215": 1315,
 }
 
 MODEL_PROTOCOL = {
@@ -254,4 +269,5 @@ MODEL_PROTOCOL = {
     "sts3250": 0,
     "sm8512bl": 0,
     "scs0009": 1,
+    "scs215": 1,
 }

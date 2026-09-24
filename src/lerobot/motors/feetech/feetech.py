@@ -103,6 +103,14 @@ class FeetechMotorsBus(SerialMotorsBus):
     model_resolution_table = deepcopy(MODEL_RESOLUTION)
     normalized_data = deepcopy(NORMALIZED_DATA)
 
+    @property
+    def supports_homing_offset(self) -> bool:
+        return self.protocol_version == 0
+
+    @property
+    def supports_sync_read(self) -> bool:
+        return self.protocol_version == 0
+
     def __init__(
         self,
         port: str,
@@ -208,6 +216,10 @@ class FeetechMotorsBus(SerialMotorsBus):
 
     def configure_motors(self, return_delay_time=0, maximum_acceleration=254, acceleration=254) -> None:
         for motor in self.motors:
+            # The current SCS215 manual leaves addresses 7 and 41 undefined.
+            if self.motors[motor].model == "scs215":
+                continue
+
             # By default, Feetech motors have a 500µs delay response time (corresponding to a value of 250 on
             # the 'Return_Delay_Time' address). We ensure this is reduced to the minimum of 2µs (value of 0).
             self.write("Return_Delay_Time", motor, return_delay_time)
