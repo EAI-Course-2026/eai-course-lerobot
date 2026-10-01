@@ -13,6 +13,7 @@ Feetech SCS215 舵机，与 LeRobot 原生 SO follower 的 STS3215 不同，因�
 examples/eai_course/
 |-- HANDOFF.md        # 面向队友的完整交接文档
 |-- setup_windows.cmd # Windows 环境安装与离线测试
+|-- calibration/      # 同一台课程机械臂的参考标定 JSON
 |-- week4/
 |   |-- task1/        # 预设姿态、键盘切换和动作序列
 |   `-- task2/        # FK、IK、直线轨迹和末端键盘控制
@@ -63,15 +64,19 @@ examples\eai_course\setup_windows.cmd
 
 ## 每台机械臂必须单独标定
 
-默认示例使用 `COM5` 和标定 ID `scs215_com5`。队友必须替换为自己的端口和
-标定 ID，不能复制别人的标定 JSON：
+默认示例使用 `COM5` 和标定 ID `scs215_com5`。团队目前共享同一台实体机械臂，
+因此队友可以直接使用仓库中的统一标定基线
+[`scs215_com5.reference.json`](./calibration/scs215_com5.reference.json)；安装方法和
+限制见 [calibration/README.md](./calibration/README.md)。使用不同机械臂时必须
+替换端口、标定 ID，并重新标定：
 
 ```cmd
 lerobot-find-port
 lerobot-calibrate --robot.type=so_follower --robot.port=COM5 --robot.id=scs215_com5
 ```
 
-标定文件保存在用户的 Hugging Face 缓存目录，不应提交到 Git。
+运行时标定文件保存在用户的 Hugging Face 缓存目录。除仓库中明确维护的参考文件
+外，不应提交个人机械臂的标定 JSON。
 
 ## 运行入口
 
@@ -121,4 +126,4 @@ git push -u origin feature/vision-marker-tracking
 python -m unittest discover -v -s examples\eai_course\week4\task2 -p "test_*.py"
 ```
 
-不要提交标定 JSON、Conda 环境、`__pycache__`、摄像头原始录制或模型权重。
+不要提交个人标定 JSON、Conda 环境、`__pycache__`、摄像头原始录制或模型权重。

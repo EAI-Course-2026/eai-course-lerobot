@@ -17,6 +17,7 @@ STS3215。
 - 位置 IK、笛卡尔直线插值和无解位置回退。
 - 使用键盘控制末端沿 X/Y/Z 方向移动。
 - 15 项不连接机械臂的自动化测试。
+- 同一台课程机械臂可复用的参考标定 JSON 和安装说明。
 
 尚未完成：
 
@@ -163,8 +164,15 @@ python -m unittest discover -v -s examples\eai_course\week4\task2 -p "test_*.py"
 %USERPROFILE%\.cache\huggingface\lerobot\calibration\robots\so_follower\<robot-id>.json
 ```
 
-每个成员必须给自己的机械臂编号并重新标定。`poses.json` 也只是参考机械臂记录的
-归一化姿态，首次运动前应低速验证，最好用 `record_pose.py` 重新记录。
+仓库同时保存了：
+
+```text
+examples/eai_course/calibration/scs215_com5.reference.json
+```
+
+团队目前使用同一台实体课程机械臂，因此它是队友环境中的统一标定基线，安装方法
+见同目录 `README.md`。换用另一台机械臂、重新安装舵盘或维修连杆时必须重新标定。
+`poses.json` 是这台共享机械臂记录的姿态，首次在新电脑运行时仍应低速验证。
 
 ## 6. 现有控制代码
 
@@ -300,4 +308,6 @@ ControlRuntime
 - 离线测试结果。
 - 是否改变控制频率、关节限制、标定或急停逻辑。
 
-禁止提交：个人标定 JSON、Conda 环境、缓存、原始视频、密钥和大模型权重。
+禁止提交：未明确审核的个人标定 JSON、Conda 环境、缓存、原始视频、密钥和
+大模型权重。仓库中的 `calibration/scs215_com5.reference.json` 是唯一受维护的
+共享参考标定。
