@@ -4,7 +4,7 @@
 Feetech SCS215 舵机，与 LeRobot 原生 SO follower 的 STS3215 不同，因此本 fork
 已经在 LeRobot 硬件层加入协议 1、1024 分辨率和 SCS215 寄存器适配。
 
-新成员请先阅读 [HANDOFF.md](examples\eai_course\HANDOFF.md)，其中记录了项目现状、分支结构、
+新成员请先阅读 [HANDOFF.md](examples/eai_course/HANDOFF.md)，其中记录了项目现状、分支结构、
 已验证环境、硬件参数、已知限制以及视觉和语音功能的接入建议。
 
 ## 目录结构
@@ -99,7 +99,7 @@ python run_steps3_to5.py --hardware --delta-mm 0 0 10 --port COM5 --robot-id scs
 python keyboard_control.py --port COM5 --robot-id scs215_com5 --speed-mm-s 10 --control-hz 20
 ```
 
-详细按键、确认短语和急停方式见 [Task 2 README](examples/eai_course/examples/eai-course/week4/task2/README.md)。
+详细按键、确认短语和急停方式见 [Task 2 README](examples/eai_course/week4/task2/README.md)。
 
 ## 协作约定
 
