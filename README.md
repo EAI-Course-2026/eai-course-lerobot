@@ -1,10 +1,10 @@
 # EAI Course LeRobot
 
-本目录保存 EAI Course 2026 的 SO-ARM101 控制代码。课程机械臂使用
+`lerobot\examples`目录保存 EAI Course 2026 的 SO-ARM101 控制代码。课程机械臂使用
 Feetech SCS215 舵机，与 LeRobot 原生 SO follower 的 STS3215 不同，因此本 fork
 已经在 LeRobot 硬件层加入协议 1、1024 分辨率和 SCS215 寄存器适配。
 
-新成员请先阅读 [HANDOFF.md](./HANDOFF.md)，其中记录了项目现状、分支结构、
+新成员请先阅读 [HANDOFF.md](lerobot\examples\eai_course\HANDOFF.md)，其中记录了项目现状、分支结构、
 已验证环境、硬件参数、已知限制以及视觉和语音功能的接入建议。
 
 ## 目录结构
