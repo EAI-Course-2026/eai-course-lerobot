@@ -2,6 +2,10 @@
 
 This directory contains all six implementation steps.
 
+Current scope: position-only IK for joints 1-5. End-effector orientation is not
+constrained, and keyboard Cartesian control does not command gripper ID 6. See
+the project [`HANDOFF.md`](../../HANDOFF.md) before adding vision or voice input.
+
 ## Step 1: calibration to URDF angles
 
 `joint_mapping.py` converts between three representations:
@@ -192,6 +196,10 @@ Start with the default 20 Hz control rate and 20 mm/s Cartesian speed:
 ```cmd
 python keyboard_control.py
 ```
+
+If every direction reports `IK 无解`, first check whether the measured start
+pose is close to a calibrated joint endpoint. The controller deliberately
+reserves a 2-degree joint margin and will reject such a start pose.
 
 The program reads the current pose, checks calibration and joint margins, and
 requires the exact phrase `START KEYBOARD CONTROL` before enabling torque on

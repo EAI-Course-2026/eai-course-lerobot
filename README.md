@@ -1,7 +1,8 @@
 > [!NOTE]
-> This fork contains the EAI Course 2026 SCS215 adapter and coursework.
-> Team setup, control programs, and collaboration commands are documented in
-> [`examples/eai_course/README.md`](./examples/eai_course/README.md).
+> 这是 EAI Course 2026 使用的 LeRobot fork。远端 `main` 已包含 SCS215
+> 舵机适配和 SO-ARM101 课程控制代码。请从
+> [课程入口](./examples/eai_course/README.md)开始；新成员先阅读
+> [项目交接文档](./examples/eai_course/HANDOFF.md)。
 
 <p align="center">
   <img alt="LeRobot, Hugging Face Robotics Library" src="./media/readme/lerobot-logo-thumbnail.png" width="100%">
