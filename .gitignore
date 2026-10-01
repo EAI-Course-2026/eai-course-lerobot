@@ -174,5 +174,6 @@ outputs/
 .cache/*
 *.stl
 *.urdf
+!examples/eai_course/week4/task2/so101_new_calib.urdf
 *.xml
 *.part

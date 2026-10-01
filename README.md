@@ -1,3 +1,8 @@
+> [!NOTE]
+> This fork contains the EAI Course 2026 SCS215 adapter and coursework.
+> Team setup, control programs, and collaboration commands are documented in
+> [`examples/eai_course/README.md`](./examples/eai_course/README.md).
+
 <p align="center">
   <img alt="LeRobot, Hugging Face Robotics Library" src="./media/readme/lerobot-logo-thumbnail.png" width="100%">
 </p>
