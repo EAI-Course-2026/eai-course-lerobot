@@ -64,11 +64,11 @@ examples\eai_course\setup_windows.cmd
 
 ## 每台机械臂必须单独标定
 
-默认示例使用 `COM5` 和标定 ID `scs215_com5`。团队目前共享同一台实体机械臂，
-因此队友可以直接使用仓库中的统一标定基线
-[`scs215_com5.reference.json`](./calibration/scs215_com5.reference.json)；安装方法和
-限制见 [calibration/README.md](./calibration/README.md)。使用不同机械臂时必须
-替换端口、标定 ID，并重新标定：
+本目录的示例与下面的 Windows 命令是历史迁移材料。当前跨 Windows/macOS
+应用和唯一共享标定由 [eai_project](https://github.com/EAI-Course-2026/eai_project)
+维护，见 [calibration/README.md](./calibration/README.md)。同一个未改装机械臂
+共用标定；每台电脑的串口和摄像头索引只写入被忽略的本机配置。
+旧参考已归档，不要按下面的旧 COM 标识安装为当前标定：
 
 ```cmd
 lerobot-find-port

@@ -1,3 +1,9 @@
+> Historical handoff. Current application commands, Windows/macOS local setup
+> and the single active calibration live in
+> [eai_project](https://github.com/EAI-Course-2026/eai_project).
+> The old COM-named calibration below is archived; see
+> [calibration/README.md](calibration/README.md) before using these old examples.
+
 # EAI Course LeRobot 项目交接
 
 更新日期：2026-10-01
@@ -167,11 +173,11 @@ python -m unittest discover -v -s examples\eai_course\week4\task2 -p "test_*.py"
 仓库同时保存了：
 
 ```text
-examples/eai_course/calibration/scs215_com5.reference.json
+examples/eai_course/calibration/history/20260928_scs215_so101.reference.json
 ```
 
-团队目前使用同一台实体课程机械臂，因此它是队友环境中的统一标定基线，安装方法
-见同目录 `README.md`。换用另一台机械臂、重新安装舵盘或维修连杆时必须重新标定。
+这是 2026-09-28 的历史参考，不再是团队标定基线。当前唯一标定和 Windows/macOS
+配置规则见同目录 `README.md`。换用另一台机械臂、重新安装舵盘或维修连杆时须重新核验。
 `poses.json` 是这台共享机械臂记录的姿态，首次在新电脑运行时仍应低速验证。
 
 ## 6. 现有控制代码
@@ -309,5 +315,5 @@ ControlRuntime
 - 是否改变控制频率、关节限制、标定或急停逻辑。
 
 禁止提交：未明确审核的个人标定 JSON、Conda 环境、缓存、原始视频、密钥和
-大模型权重。仓库中的 `calibration/scs215_com5.reference.json` 是唯一受维护的
-共享参考标定。
+大模型权重。唯一受维护的共享标定在 `eai_project/calibration/scs215_so101.json`，
+本 fork 的 `calibration/history/` 只保留历史参考。
