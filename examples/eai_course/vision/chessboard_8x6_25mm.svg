@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 297 210">
+  <title>OpenCV calibration chessboard, 8 by 6 inner corners, 25 mm squares</title>
+  <rect width="297" height="210" fill="white"/>
+  <defs>
+    <pattern id="checker" width="50" height="50" patternUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="25" height="25" fill="black"/>
+      <rect x="25" y="25" width="25" height="25" fill="black"/>
+    </pattern>
+  </defs>
+  <!-- 9 x 7 squares produce 8 x 6 internal corners. -->
+  <rect x="36" y="17.5" width="225" height="175" fill="url(#checker)"/>
+  <text x="148.5" y="203" text-anchor="middle" font-family="Arial, sans-serif" font-size="4">
+    8 x 6 inner corners, 25 mm squares - print at 100% / actual size
+  </text>
+</svg>
