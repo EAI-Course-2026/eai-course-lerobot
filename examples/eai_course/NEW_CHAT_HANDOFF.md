@@ -124,9 +124,11 @@ lerobot/
   其默认串口是 `COM7`；连接本机机械臂时显式传 `--port COM5`。
 - `voice/` 只有接入说明，尚无语音识别、命令解析或调度实现。
 
-`vision/outputs/`、缓存和本机采集图像被 Git 忽略；新克隆不会包含原始内参、姿态
-或同步样本。`vision/results/` 只保存经过筛选的结果及质量说明。参考舵机标定 JSON
-已提交。
+`vision/outputs/` 默认被 Git 忽略，但当前使用的 `camera_intrinsics.json`、
+`poses.json`、`samples.json` 和 `hand_eye_result.json` 已作为例外提交，方便团队在默认
+路径继续求解和重采。原始照片、坐标轴预览、历史归档和缓存仍不上传；`samples.json`
+中的旧图片路径只用于溯源，离线求解使用已保存的矩阵，不要求这些图片存在。
+`vision/results/` 保存经过筛选的结果及质量说明。参考舵机标定 JSON 也已提交。
 
 ## 5. 接手时可运行的检查
 

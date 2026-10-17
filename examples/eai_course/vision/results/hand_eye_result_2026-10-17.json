@@ -56,6 +56,6 @@
   },
   "notes": [
     "This result has not passed the desired Z-axis accuracy check.",
-    "Raw captures and synchronized samples are intentionally not committed."
+    "Raw captures are not committed; synchronized matrices are shared at the default output path."
   ]
 }

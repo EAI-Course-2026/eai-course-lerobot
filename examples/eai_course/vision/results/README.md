@@ -1,8 +1,10 @@
 # Vision calibration results
 
-This directory contains small, reviewable calibration results that are safe to
-version. Raw frames, synchronized samples, local camera captures, and archived
-runs remain under `../outputs/` and are intentionally ignored by Git.
+This directory contains small, reviewable calibration results. The current
+intrinsics, recorded poses, synchronized sample matrices, and generated result
+are also tracked at their default paths under `../outputs/` so another teammate
+can continue the workflow without copying files. Raw frames, annotated images,
+debug data, and archived runs remain ignored by Git.
 
 ## Current Eye-in-Hand result
 
