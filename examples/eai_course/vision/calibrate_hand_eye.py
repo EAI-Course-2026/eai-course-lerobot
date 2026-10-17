@@ -10,9 +10,10 @@ import shutil
 import sys
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import cv2
 import numpy as np
@@ -28,8 +29,10 @@ from camera_calibration import CameraCalibration, find_chessboard_corners
 from hand_eye_calibration import (
     HAND_EYE_METHODS,
     HandEyeSample,
+    canonicalize_target_frame,
     estimate_target_pose,
     load_dataset,
+    prepare_hand_eye_samples,
     save_dataset,
     solve_all_methods,
     solve_hand_eye,
@@ -270,6 +273,65 @@ class PoseRecordingPreview:
         self.root.after(30, self.update)
 
 
+class CapturePreview:
+    """Display the camera's latest frame without consuming capture events."""
+
+    def __init__(self, camera: object, emergency: EmergencyStop) -> None:
+        import tkinter as tk
+
+        self.root = tk.Tk()
+        self.root.title("SO-101 hand-eye capture")
+        self.label = tk.Label(self.root)
+        self.label.pack()
+        self.status = tk.Label(self.root, text="Camera preview", font=("Segoe UI", 11))
+        self.status.pack(pady=6)
+        self.camera = camera
+        self.emergency = emergency
+        self.photo: ImageTk.PhotoImage | None = None
+        self.next_requested = False
+        self.last_frame_at = 0.0
+        self.closed = False
+        self.root.bind("<Return>", self.request_next)
+        self.root.bind("<space>", self.stop)
+        self.root.bind("q", self.stop)
+        self.root.bind("<Escape>", self.stop)
+        self.root.protocol("WM_DELETE_WINDOW", self.stop)
+
+    def request_next(self, _event: object) -> None:
+        self.next_requested = True
+
+    def stop(self, _event: object | None = None) -> None:
+        self.emergency.requested.set()
+
+    def set_status(self, message: str) -> None:
+        self.status.configure(text=message)
+
+    def pump(self) -> None:
+        if self.emergency.requested.is_set():
+            raise KeyboardInterrupt("Emergency stop")
+        now = time.monotonic()
+        if now - self.last_frame_at >= 1 / 15:
+            frame_rgb = self.camera.read_latest(max_age_ms=1000)
+            self.photo = ImageTk.PhotoImage(image=Image.fromarray(frame_rgb.copy()))
+            self.label.configure(image=self.photo)
+            self.last_frame_at = now
+        self.root.update()
+        if self.emergency.requested.is_set():
+            raise KeyboardInterrupt("Emergency stop")
+
+    def wait_for_next(self, name: str, index: int, count: int) -> None:
+        self.next_requested = False
+        self.set_status(f"Ready for {name} ({index}/{count}). Press Enter here to move.")
+        while not self.next_requested:
+            self.pump()
+            time.sleep(0.03)
+
+    def close(self) -> None:
+        if not self.closed:
+            self.closed = True
+            self.root.destroy()
+
+
 def run_record_poses(args: argparse.Namespace) -> int:
     initial_poses: list[dict[str, object]] = []
     if args.output.is_file() and not args.overwrite:
@@ -345,9 +407,12 @@ def wait_for_target(
     *,
     tolerance_deg: float,
     timeout_s: float,
+    progress: Callable[[], None] | None = None,
 ) -> np.ndarray:
     deadline = time.monotonic() + timeout_s
     while True:
+        if progress is not None:
+            progress()
         if emergency.requested.is_set():
             raise KeyboardInterrupt("Emergency stop")
         measured = measured_arm_degrees(robot, mapper)
@@ -383,11 +448,14 @@ def move_joints_smoothly(
     *,
     speed_deg_s: float,
     control_hz: float,
+    progress: Callable[[], None] | None = None,
 ) -> None:
     max_delta = float(np.max(np.abs(target - start)))
     steps = max(1, math.ceil(max_delta / (speed_deg_s / control_hz)))
     next_tick = time.perf_counter()
     for index in range(1, steps + 1):
+        if progress is not None:
+            progress()
         if emergency.requested.is_set():
             raise KeyboardInterrupt("Emergency stop")
         joint_degrees = start + (target - start) * (index / steps)
@@ -397,10 +465,24 @@ def move_joints_smoothly(
         }
         action["gripper.pos"] = gripper_position
         robot.send_action(action)
-        next_tick += 1.0 / control_hz
+        next_tick = max(next_tick, time.perf_counter()) + 1.0 / control_hz
         delay = next_tick - time.perf_counter()
         if delay > 0:
             time.sleep(delay)
+
+
+def wait_while_previewing(
+    duration_s: float,
+    emergency: EmergencyStop,
+    progress: Callable[[], None] | None = None,
+) -> None:
+    deadline = time.monotonic() + duration_s
+    while time.monotonic() < deadline:
+        if progress is not None:
+            progress()
+        if emergency.requested.is_set():
+            raise KeyboardInterrupt("Emergency stop")
+        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
 
 
 def capture_best_observation(
@@ -409,11 +491,16 @@ def capture_best_observation(
     *,
     frame_count: int,
     timeout_ms: int,
+    progress: Callable[[], None] | None = None,
 ) -> tuple[np.ndarray, object]:
     candidates: list[tuple[float, np.ndarray, object]] = []
     for _ in range(frame_count):
+        if progress is not None:
+            progress()
         frame_rgb = camera.async_read(timeout_ms=timeout_ms)
         observation = estimate_target_pose(frame_rgb, calibration)
+        if progress is not None:
+            progress()
         if observation is not None:
             candidates.append((observation.reprojection_error_px, frame_rgb.copy(), observation))
     if not candidates:
@@ -463,6 +550,8 @@ def run_capture(args: argparse.Namespace) -> int:
             f"Pose file has {len(poses)} poses; at least {args.minimum_samples} are required"
         )
     calibration = CameraCalibration.load(args.intrinsics)
+    if args.square_size_mm is not None:
+        calibration = replace(calibration, square_size_mm=args.square_size_mm)
     if calibration.image_size != (args.width, args.height):
         raise ValueError(
             f"Camera calibration is {calibration.image_size}, requested {(args.width, args.height)}"
@@ -493,13 +582,58 @@ def run_capture(args: argparse.Namespace) -> int:
         validate_pose(target, args.joint_margin_deg)
         targets.append((str(pose["name"]), target))
 
+    samples: list[HandEyeSample] = []
+    recapture_names = tuple(dict.fromkeys(args.recapture)) if args.recapture else ()
+    if recapture_names:
+        available_pose_names = {name for name, _ in targets}
+        unknown_poses = sorted(set(recapture_names) - available_pose_names)
+        if unknown_poses:
+            raise ValueError(f"Unknown recorded poses: {', '.join(unknown_poses)}")
+        if not args.output.is_file():
+            raise FileNotFoundError(
+                f"Cannot recapture selected poses without an existing dataset: {args.output}"
+            )
+        existing_dataset, samples = load_dataset(args.output)
+        existing_target = existing_dataset.get("target")
+        if not isinstance(existing_target, dict):
+            raise ValueError(
+                "Existing dataset has no target metadata; run a full capture before selective recapture"
+            )
+        existing_corners = existing_target["inner_corners"]
+        existing_pattern_size = (
+            int(existing_corners["columns"]),
+            int(existing_corners["rows"]),
+        )
+        existing_square_size_mm = float(existing_target["square_size_mm"])
+        if existing_pattern_size != calibration.pattern_size or not np.isclose(
+            existing_square_size_mm, calibration.square_size_mm
+        ):
+            raise ValueError(
+                "Existing dataset target geometry does not match this capture: "
+                f"existing {existing_pattern_size} at {existing_square_size_mm:.3f} mm, "
+                f"requested {calibration.pattern_size} at {calibration.square_size_mm:.3f} mm"
+            )
+        if not existing_target.get("corner_order_canonicalized", False):
+            raise ValueError(
+                "Existing dataset corner order is not canonicalized; run a full capture first"
+            )
+        existing_sample_names = {sample.name for sample in samples}
+        missing_samples = sorted(set(recapture_names) - existing_sample_names)
+        if missing_samples:
+            raise ValueError(
+                f"Existing dataset has no samples to replace: {', '.join(missing_samples)}"
+            )
+        selected = set(recapture_names)
+        targets = [(name, target) for name, target in targets if name in selected]
+
     emergency = EmergencyStop()
     listener = keyboard.Listener(on_press=emergency.on_press)
     torque_enabled = False
     camera = robot.cameras["wrist"]
-    samples: list[HandEyeSample] = []
     skipped: list[tuple[str, str]] = []
+    replaced_names: list[str] = []
     output_backed_up = False
+    preview: CapturePreview | None = None
     robot.bus.connect(handshake=False)
     try:
         robot.bus.port_handler.clearPort()
@@ -513,13 +647,28 @@ def run_capture(args: argparse.Namespace) -> int:
         camera.connect()
 
         print(f"FK backend: {fk_backend}")
-        print(f"Samples to collect: {len(targets)}")
+        print(f"Hand-eye target square size: {calibration.square_size_mm:.3f} mm")
+        if recapture_names:
+            print("Samples to replace:", ", ".join(recapture_names))
+            print(
+                "Movement and capture sequence:",
+                " -> ".join(name for name, _ in targets),
+            )
+        else:
+            print(f"Samples to collect: {len(targets)}")
         print("Space is the emergency stop. Keep the servo power switch within reach.")
-        phrase = f"START HAND EYE CAPTURE {len(targets)}"
+        phrase = (
+            f"START HAND EYE RECAPTURE {len(recapture_names)}"
+            if recapture_names
+            else f"START HAND EYE CAPTURE {len(targets)}"
+        )
         if input(f'Type exactly "{phrase}" to enable torque: ').strip() != phrase:
             print("Confirmation did not match. No movement command was sent.")
             return 0
 
+        if args.preview:
+            preview = CapturePreview(camera, emergency)
+            preview.pump()
         robot.bus.sync_write("Goal_Position", current_goals)
         robot.bus.enable_torque(list(ARM_JOINT_NAMES), num_retry=5)
         torque_enabled = True
@@ -527,8 +676,13 @@ def run_capture(args: argparse.Namespace) -> int:
 
         for index, (name, target) in enumerate(targets, start=1):
             if not args.automatic:
-                input(f"\nReady for {name} ({index}/{len(targets)}). Press ENTER to move...")
+                if preview is not None:
+                    preview.wait_for_next(name, index, len(targets))
+                else:
+                    input(f"\nReady for {name} ({index}/{len(targets)}). Press ENTER to move...")
             try:
+                if preview is not None:
+                    preview.set_status(f"Moving to {name} ({index}/{len(targets)})")
                 move_joints_smoothly(
                     robot,
                     mapper,
@@ -538,7 +692,10 @@ def run_capture(args: argparse.Namespace) -> int:
                     emergency,
                     speed_deg_s=args.speed_deg_s,
                     control_hz=args.control_hz,
+                    progress=preview.pump if preview is not None else None,
                 )
+                if preview is not None:
+                    preview.set_status(f"Checking {name} ({index}/{len(targets)})")
                 measured = wait_for_target(
                     robot,
                     mapper,
@@ -546,13 +703,23 @@ def run_capture(args: argparse.Namespace) -> int:
                     emergency,
                     tolerance_deg=args.joint_tolerance_deg,
                     timeout_s=args.pose_timeout_s,
+                    progress=preview.pump if preview is not None else None,
                 )
-                time.sleep(args.settle_s)
+                if preview is not None:
+                    preview.set_status(f"Settling at {name} ({index}/{len(targets)})")
+                wait_while_previewing(
+                    args.settle_s,
+                    emergency,
+                    progress=preview.pump if preview is not None else None,
+                )
+                if preview is not None:
+                    preview.set_status(f"Capturing {name} ({index}/{len(targets)})")
                 frame_rgb, observation = capture_best_observation(
                     camera,
                     calibration,
                     frame_count=args.capture_frames,
                     timeout_ms=args.camera_timeout_ms,
+                    progress=preview.pump if preview is not None else None,
                 )
                 if observation.reprojection_error_px > args.max_pnp_error_px:
                     raise SampleRejectedError(
@@ -561,6 +728,18 @@ def run_capture(args: argparse.Namespace) -> int:
                     )
                 measured = measured_arm_degrees(robot, mapper)
                 base_T_gripper = fk.forward_kinematics(measured)
+                canonical_target, corner_order_flipped = canonicalize_target_frame(
+                    samples,
+                    base_T_gripper,
+                    observation.camera_T_target,
+                    pattern_size=calibration.pattern_size,
+                    square_size_mm=calibration.square_size_mm,
+                )
+                if corner_order_flipped:
+                    observation = replace(
+                        observation, camera_T_target=canonical_target
+                    )
+                    print(f"Canonicalized 180-degree corner order for {name}")
                 if not output_backed_up:
                     backup = backup_existing_file(args.output, session_id)
                     if backup is not None:
@@ -571,21 +750,34 @@ def run_capture(args: argparse.Namespace) -> int:
                 save_sample_images(
                     image_path, axes_path, frame_rgb, observation, calibration
                 )
-                samples.append(
-                    HandEyeSample(
-                        name=name,
-                        image=str(image_path.resolve()),
-                        joint_degrees=tuple(float(value) for value in measured),
-                        base_T_gripper=base_T_gripper,
-                        camera_T_target=observation.camera_T_target,
-                        pnp_reprojection_error_px=observation.reprojection_error_px,
-                    )
+                new_sample = HandEyeSample(
+                    name=name,
+                    image=str(image_path.resolve()),
+                    joint_degrees=tuple(float(value) for value in measured),
+                    base_T_gripper=base_T_gripper,
+                    camera_T_target=observation.camera_T_target,
+                    pnp_reprojection_error_px=observation.reprojection_error_px,
                 )
+                if recapture_names:
+                    sample_by_name = {sample.name: sample for sample in samples}
+                    sample_by_name[name] = new_sample
+                    pose_order = [str(pose["name"]) for pose in poses]
+                    samples = [
+                        sample_by_name[pose_name]
+                        for pose_name in pose_order
+                        if pose_name in sample_by_name
+                    ]
+                    replaced_names.append(name)
+                else:
+                    samples.append(new_sample)
                 save_dataset(
                     args.output,
                     samples,
                     camera_calibration_path=args.intrinsics,
                     urdf_path=args.urdf,
+                    target_pattern_size=calibration.pattern_size,
+                    target_square_size_mm=calibration.square_size_mm,
+                    corner_order_canonicalized=True,
                 )
                 tracking_errors = np.abs(measured - target)
                 worst_index = int(np.argmax(tracking_errors))
@@ -595,23 +787,28 @@ def run_capture(args: argparse.Namespace) -> int:
                     f"{tracking_errors[worst_index]:.2f} deg "
                     f"({ARM_JOINT_NAMES[worst_index]})"
                 )
+                if preview is not None:
+                    preview.set_status(
+                        f"Captured {name}: PnP {observation.reprojection_error_px:.2f} px"
+                    )
                 current = measured
             except SampleRejectedError as exc:
                 skipped.append((name, str(exc)))
                 print(f"SKIPPED {name}: {exc}", file=sys.stderr)
+                if preview is not None:
+                    preview.set_status(f"Skipped {name}; see terminal for details")
                 current = measured_arm_degrees(robot, mapper)
                 continue
 
-        print(
-            f"\nCapture complete: {len(samples)} captured, "
-            f"{len(skipped)} skipped."
-        )
+        completed_count = len(replaced_names) if recapture_names else len(samples)
+        action = "replaced" if recapture_names else "captured"
+        print(f"\nCapture complete: {completed_count} {action}, {len(skipped)} skipped.")
         for name, reason in skipped:
             print(f"  SKIPPED {name}: {reason}")
-        if samples:
+        if completed_count:
             print(f"Saved synchronized samples: {args.output}")
         else:
-            print("No synchronized sample was saved.")
+            print("No synchronized sample was changed.")
         if len(samples) < args.minimum_samples:
             print(
                 f"WARNING: only {len(samples)} valid samples; at least "
@@ -619,19 +816,23 @@ def run_capture(args: argparse.Namespace) -> int:
             )
         return 0
     finally:
-        if listener.is_alive():
-            listener.stop()
-            listener.join(timeout=1.0)
         if torque_enabled and robot.bus.is_connected:
             try:
                 robot.bus.disable_torque(list(ARM_JOINT_NAMES), num_retry=5)
                 print("Arm torque disabled.")
             except Exception as exc:
                 print(f"WARNING: torque disable failed: {exc}", file=sys.stderr)
-        if camera.is_connected:
-            camera.disconnect()
-        if robot.bus.is_connected:
-            robot.bus.disconnect(disable_torque=False)
+        if listener.is_alive():
+            listener.stop()
+            listener.join(timeout=1.0)
+        try:
+            if camera.is_connected:
+                camera.disconnect()
+        finally:
+            if robot.bus.is_connected:
+                robot.bus.disconnect(disable_torque=False)
+            if preview is not None:
+                preview.close()
 
 
 def create_summary_image(
@@ -685,11 +886,54 @@ def create_summary_image(
 
 
 def run_solve(args: argparse.Namespace) -> int:
-    _, samples = load_dataset(args.dataset)
+    dataset, samples = load_dataset(args.dataset)
     if len(samples) < args.minimum_samples:
         raise ValueError(
             f"Dataset has {len(samples)} samples; at least {args.minimum_samples} are required"
         )
+    target = dataset.get("target")
+    if isinstance(target, dict):
+        corners = target["inner_corners"]
+        pattern_size = (int(corners["columns"]), int(corners["rows"]))
+        recorded_square_size_mm = float(target["square_size_mm"])
+        already_canonicalized = bool(target.get("corner_order_canonicalized", False))
+    else:
+        calibration_path = Path(str(dataset["camera_calibration"]))
+        calibration = CameraCalibration.load(calibration_path)
+        pattern_size = calibration.pattern_size
+        recorded_square_size_mm = calibration.square_size_mm
+        already_canonicalized = False
+
+    pnp_square_size_mm = (
+        args.pnp_square_size_mm
+        if args.pnp_square_size_mm is not None
+        else recorded_square_size_mm
+    )
+    actual_square_size_mm = (
+        args.square_size_mm
+        if args.square_size_mm is not None
+        else recorded_square_size_mm
+    )
+    canonicalize_corners = not args.no_canonicalize_corners and not already_canonicalized
+    samples, flipped_names = prepare_hand_eye_samples(
+        samples,
+        pattern_size=pattern_size,
+        pnp_square_size_mm=pnp_square_size_mm,
+        actual_square_size_mm=actual_square_size_mm,
+        canonicalize_corners=canonicalize_corners,
+    )
+    print(
+        "Target geometry: "
+        f"{pattern_size[0]}x{pattern_size[1]} inner corners, "
+        f"PnP square {pnp_square_size_mm:.3f} mm, "
+        f"actual square {actual_square_size_mm:.3f} mm"
+    )
+    if flipped_names:
+        print("Canonicalized 180-degree corner order:", ", ".join(flipped_names))
+    elif already_canonicalized:
+        print("Corner order was canonicalized during capture.")
+    elif canonicalize_corners:
+        print("No 180-degree corner-order changes were required.")
     all_results = solve_all_methods(samples)
     if not all_results:
         raise RuntimeError("All OpenCV hand-eye methods failed")
@@ -711,6 +955,18 @@ def run_solve(args: argparse.Namespace) -> int:
         else None
     )
     payload = result.to_json()
+    payload["preprocessing"] = {
+        "source_dataset": str(args.dataset.resolve()),
+        "pattern_inner_corners": {
+            "columns": pattern_size[0],
+            "rows": pattern_size[1],
+        },
+        "pnp_square_size_mm": pnp_square_size_mm,
+        "actual_square_size_mm": actual_square_size_mm,
+        "translation_scale": actual_square_size_mm / pnp_square_size_mm,
+        "corner_order_canonicalized": canonicalize_corners or already_canonicalized,
+        "flipped_samples": flipped_names,
+    }
     if actual_origin is not None:
         axis_error = result.base_T_target[:3, 3] * 1000.0 - actual_origin
         payload["measured_board_origin_in_base_mm"] = actual_origin.tolist()
@@ -783,8 +1039,19 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--camera-timeout-ms", type=int, default=5000)
     capture.add_argument("--poses", type=Path, default=DEFAULT_ROOT / "poses.json")
     capture.add_argument("--intrinsics", type=Path, default=DEFAULT_INTRINSICS)
+    capture.add_argument(
+        "--square-size-mm",
+        type=float,
+        help="Physical hand-eye target square size; defaults to the intrinsics JSON value",
+    )
     capture.add_argument("--urdf", type=Path, default=DEFAULT_URDF)
     capture.add_argument("--output", type=Path, default=DEFAULT_ROOT / "samples.json")
+    capture.add_argument(
+        "--recapture",
+        nargs="+",
+        metavar="POSE_NAME",
+        help="Recapture named poses and replace only those samples in an existing dataset",
+    )
     capture.add_argument("--images-dir", type=Path, default=DEFAULT_ROOT / "images")
     capture.add_argument("--axes-dir", type=Path, default=DEFAULT_ROOT / "axes")
     capture.add_argument("--minimum-samples", type=int, default=12)
@@ -802,11 +1069,30 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--capture-frames", type=int, default=8)
     capture.add_argument("--max-pnp-error-px", type=float, default=1.5)
     capture.add_argument("--automatic", action="store_true")
+    capture.add_argument(
+        "--no-preview", dest="preview", action="store_false",
+        help="Disable the live camera window (for headless sessions)",
+    )
 
     solve = subparsers.add_parser("solve", help="Solve and evaluate gripper_T_camera")
     solve.add_argument("--dataset", type=Path, default=DEFAULT_ROOT / "samples.json")
     solve.add_argument("--method", choices=tuple(HAND_EYE_METHODS), default="park")
     solve.add_argument("--minimum-samples", type=int, default=12)
+    solve.add_argument(
+        "--square-size-mm",
+        type=float,
+        help="Actual target square size; rescales legacy PnP translations",
+    )
+    solve.add_argument(
+        "--pnp-square-size-mm",
+        type=float,
+        help="Square size originally used by PnP; normally read from dataset metadata",
+    )
+    solve.add_argument(
+        "--no-canonicalize-corners",
+        action="store_true",
+        help="Disable FK-based correction of symmetric-board 180-degree corner reversal",
+    )
     solve.add_argument(
         "--measured-board-origin-mm",
         nargs=3,

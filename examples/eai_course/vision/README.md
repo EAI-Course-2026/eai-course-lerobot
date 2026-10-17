@@ -91,7 +91,7 @@ python calibrate_camera.py verify --camera-index 1 --width 640 --height 480
 `DETECTED`、棋盘格完整可见时，在预览窗口按 `Space` 或 `Enter` 保存当前姿态：
 
 ```cmd
-python calibrate_hand_eye.py record-poses --port COM5 --camera-index 1 --count 15
+python calibrate_hand_eye.py record-poses --port COM6 --camera-index 1 --count 15
 ```
 
 姿态必须位于关节范围内部，并保证之后按记录顺序插值运动不会碰撞。红色
@@ -104,7 +104,7 @@ python calibrate_hand_eye.py record-poses --port COM5 --camera-index 1 --count 1
 使用临时文件原子替换，避免写入中断损坏 JSON。需要彻底从 `pose_01` 重录时使用：
 
 ```cmd
-python calibrate_hand_eye.py record-poses --port COM5 --camera-index 1 --count 15 --overwrite
+python calibrate_hand_eye.py record-poses --port COM6 --camera-index 1 --count 15 --overwrite
 ```
 
 首次成功保存新姿态前，旧文件会先复制到
@@ -115,16 +115,46 @@ python calibrate_hand_eye.py record-poses --port COM5 --camera-index 1 --count 1
 将棋盘固定，使每个已记录姿态都能完整看到棋盘，然后运行：
 
 ```cmd
-python calibrate_hand_eye.py capture --port COM5 --camera-index 1
+python calibrate_hand_eye.py capture --port COM6 --camera-index 1 --square-size-mm 19.6
 ```
 
-程序只有在输入精确确认短语后才启用 ID 1 至 5 的扭矩；默认每个姿态移动前还需
-按 Enter。按空格会请求急停并关闭扭矩。每次稳定后保存以下配对数据：
+当前棋盘显示在笔记本屏幕上，实测连续 5 格为 98 mm，因此单格为 19.6 mm；该值
+只适用于保持相同浏览器缩放和显示设置的这块屏幕。若改用打印板，应改回打印后
+实测的方格尺寸。相机内参不因这里的尺寸变化而改变，但 PnP 平移尺度会随之变化。
+
+采集时会打开实时相机预览，显示当前姿态的移动、到位和拍摄状态。默认逐姿态确认：
+在**预览窗口**按 Enter 才开始移动到下一姿态。若已确认所有记录姿态之间的路径
+安全，可加 `--automatic` 连续移动和采集；不要在首次验证路径时使用自动模式。
+关闭预览窗口或在其中按 `Space`、`Q`、`Esc` 会请求急停。无桌面图形界面时可加
+`--no-preview`，此时逐姿态确认仍在终端按 Enter。预览使用相机的最新帧，不消耗
+正式采样读取的帧；保存的原图仍是机械臂稳定后选出的同步采集帧。
+
+连续自动采集命令：
+
+```cmd
+python calibrate_hand_eye.py capture --port COM6 --camera-index 1 --square-size-mm 19.6 --automatic
+```
+
+程序只有在输入精确确认短语后才启用 ID 1 至 5 的扭矩。按空格会请求急停并关闭
+扭矩。每次稳定后保存以下配对数据：
 
 ```text
 base_T_gripper   FK 得到的末端到基座变换
 camera_T_target  solvePnP 得到的棋盘到相机变换
 ```
+
+若求解诊断确认只有少数姿态误差较大，可以只重采这些姿态并合并回现有数据集：
+
+```cmd
+python calibrate_hand_eye.py capture --port COM6 --camera-index 1 --square-size-mm 19.6 --recapture pose_03 pose_07 pose_11 --speed-deg-s 8 --settle-s 3
+```
+
+该模式要求现有 `samples.json` 已包含相同棋盘尺寸和这些姿态。每个成功姿态替换
+同名旧样本，其他样本保持不变；失败或跳过的姿态继续保留旧样本。首次成功替换前
+会备份原 JSON，新图片保存在新的时间戳目录。程序只会依次移动并采集
+`pose_03 -> pose_07 -> pose_11`，不会经过其他记录姿态。由于三个姿态之间是直接
+运动，首次运行应在预览窗口逐次按 Enter，并确认路径不会碰撞后再考虑追加
+`--automatic`。本例的扭矩确认短语为 `START HAND EYE RECAPTURE 3`。
 
 SCS215 在重力、齿隙和线缆拉力作用下通常不会精确停在指令角度，因此默认到位容差
 为 10 度。程序拍照后会重新读取编码器，并用实测关节角而非指令角计算 FK，所以这项
@@ -143,15 +173,20 @@ SCS215 在重力、齿隙和线缆拉力作用下通常不会精确停在指令�
 有效样本达到 12 个后，可以先不提供尺量坐标，只求手眼矩阵和内部一致性：
 
 ```cmd
-python calibrate_hand_eye.py solve --method park
+python calibrate_hand_eye.py solve --method park --square-size-mm 19.6
 ```
+
+对于旧版以 25 mm 计算、但实际屏幕方格为 19.6 mm 的 `samples.json`，上述命令会
+缩放已保存的 PnP 平移，并用 FK 相对旋转自动统一对称棋盘可能发生的 180 度角点
+顺序翻转；原始数据不会被改写。新版 `capture` 会在保存样本前完成角点顺序统一，
+并把实际方格尺寸写入数据集元数据。
 
 若还要完成 5 cm 的外部误差检查，先测量棋盘 **第一个内角点** 在机器人 base
 坐标系中的实际 X/Y/Z，单位为毫米，再把三个实测数值写进命令。下面的
 `300 -50 20` 只是格式示例，不是本机械臂的真实坐标：
 
 ```cmd
-python calibrate_hand_eye.py solve --method park --measured-board-origin-mm 300 -50 20
+python calibrate_hand_eye.py solve --method park --square-size-mm 19.6 --measured-board-origin-mm 300 -50 20
 ```
 
 OpenCV 返回 `gripper_T_camera`：相机坐标中的点乘该矩阵后进入末端坐标系；其中平移

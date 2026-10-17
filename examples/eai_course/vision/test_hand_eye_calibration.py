@@ -7,7 +7,9 @@ import numpy as np
 
 from hand_eye_calibration import (
     HandEyeSample,
+    checkerboard_half_turn_transform,
     invert_transform,
+    prepare_hand_eye_samples,
     rotation_angle_degrees,
     solve_hand_eye,
     transform_from_rt,
@@ -82,6 +84,37 @@ class HandEyeCalibrationTest(unittest.TestCase):
         self.assertLess(rotation_error, 1e-5)
         np.testing.assert_allclose(result.base_T_target, fixed_base_T_target, atol=1e-8)
         np.testing.assert_allclose(result.board_origin_rmse_mm, 0.0, atol=1e-8)
+
+    def test_checkerboard_half_turn_is_an_involution(self) -> None:
+        transform = checkerboard_half_turn_transform((8, 6), 25.0)
+        np.testing.assert_allclose(transform @ transform, np.eye(4), atol=1e-12)
+        np.testing.assert_allclose(transform[:3, 3], (0.175, 0.125, 0.0))
+
+    def test_prepares_reversed_corners_and_rescales_translation(self) -> None:
+        half_turn = checkerboard_half_turn_transform((8, 6), 25.0)
+        base_1 = np.eye(4)
+        base_2 = transform_from_rotation_vector((0.0, 0.0, 0.7), (0.0, 0.0, 0.0))
+        target_1 = np.eye(4)
+        target_2 = invert_transform(base_2)
+        target_2[:3, 3] = (0.1, -0.05, 0.3)
+        reversed_target_2 = target_2 @ half_turn
+        samples = [
+            HandEyeSample("one", "", (0.0,) * 5, base_1, target_1, 0.1),
+            HandEyeSample("two", "", (0.0,) * 5, base_2, reversed_target_2, 0.1),
+        ]
+
+        prepared, flipped = prepare_hand_eye_samples(
+            samples,
+            pattern_size=(8, 6),
+            pnp_square_size_mm=25.0,
+            actual_square_size_mm=20.0,
+        )
+
+        self.assertEqual(flipped, ["two"])
+        np.testing.assert_allclose(prepared[1].camera_T_target[:3, :3], target_2[:3, :3])
+        np.testing.assert_allclose(
+            prepared[1].camera_T_target[:3, 3], target_2[:3, 3] * 0.8
+        )
 
 
 if __name__ == "__main__":

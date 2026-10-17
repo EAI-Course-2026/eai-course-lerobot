@@ -199,6 +199,9 @@ def save_dataset(
     *,
     camera_calibration_path: Path,
     urdf_path: Path,
+    target_pattern_size: tuple[int, int] | None = None,
+    target_square_size_mm: float | None = None,
+    corner_order_canonicalized: bool = False,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -210,6 +213,16 @@ def save_dataset(
         "urdf": str(urdf_path.resolve()),
         "samples": [sample.to_json() for sample in samples],
     }
+    if target_pattern_size is not None and target_square_size_mm is not None:
+        payload["target"] = {
+            "type": "chessboard",
+            "inner_corners": {
+                "columns": target_pattern_size[0],
+                "rows": target_pattern_size[1],
+            },
+            "square_size_mm": target_square_size_mm,
+            "corner_order_canonicalized": corner_order_canonicalized,
+        }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -219,6 +232,121 @@ def load_dataset(path: Path) -> tuple[dict[str, object], list[HandEyeSample]]:
         raise ValueError(f"Unsupported hand-eye dataset: {path}")
     samples = [HandEyeSample.from_json(item) for item in payload["samples"]]
     return payload, samples
+
+
+def checkerboard_half_turn_transform(
+    pattern_size: tuple[int, int], square_size_mm: float
+) -> np.ndarray:
+    """Map a reversed checkerboard frame onto the same physical board frame."""
+    columns, rows = pattern_size
+    if columns < 2 or rows < 2 or square_size_mm <= 0:
+        raise ValueError("Invalid checkerboard geometry")
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, :3] = np.diag([-1.0, -1.0, 1.0])
+    transform[:3, 3] = (
+        (columns - 1) * square_size_mm / 1000.0,
+        (rows - 1) * square_size_mm / 1000.0,
+        0.0,
+    )
+    return transform
+
+
+def canonicalize_target_frame(
+    previous_samples: Sequence[HandEyeSample],
+    base_T_gripper: np.ndarray,
+    camera_T_target: np.ndarray,
+    *,
+    pattern_size: tuple[int, int],
+    square_size_mm: float,
+) -> tuple[np.ndarray, bool]:
+    """Resolve the chessboard's 180-degree ambiguity using FK rotation changes."""
+    candidate = np.asarray(camera_T_target, dtype=np.float64)
+    if not previous_samples:
+        return candidate.copy(), False
+
+    half_turn = checkerboard_half_turn_transform(pattern_size, square_size_mm)
+    flipped = candidate @ half_turn
+
+    def consistency_cost(target_pose: np.ndarray) -> float:
+        mismatches = []
+        for previous in previous_samples:
+            robot_relative = (
+                previous.base_T_gripper[:3, :3].T @ base_T_gripper[:3, :3]
+            )
+            camera_relative = (
+                previous.camera_T_target[:3, :3].T @ target_pose[:3, :3]
+            )
+            mismatches.append(
+                abs(
+                    rotation_angle_degrees(robot_relative)
+                    - rotation_angle_degrees(camera_relative)
+                )
+            )
+        return float(np.median(mismatches))
+
+    original_cost = consistency_cost(candidate)
+    flipped_cost = consistency_cost(flipped)
+    if flipped_cost < original_cost:
+        return flipped, True
+    return candidate.copy(), False
+
+
+def prepare_hand_eye_samples(
+    samples: Sequence[HandEyeSample],
+    *,
+    pattern_size: tuple[int, int],
+    pnp_square_size_mm: float,
+    actual_square_size_mm: float,
+    canonicalize_corners: bool = True,
+) -> tuple[list[HandEyeSample], list[str]]:
+    """Canonicalize target frames and correct PnP translation scale."""
+    if pnp_square_size_mm <= 0 or actual_square_size_mm <= 0:
+        raise ValueError("Checkerboard square sizes must be positive")
+
+    canonical: list[HandEyeSample] = []
+    flipped_names: list[str] = []
+    for sample in samples:
+        target = sample.camera_T_target.copy()
+        flipped = False
+        if canonicalize_corners:
+            target, flipped = canonicalize_target_frame(
+                canonical,
+                sample.base_T_gripper,
+                target,
+                pattern_size=pattern_size,
+                square_size_mm=pnp_square_size_mm,
+            )
+        if flipped:
+            flipped_names.append(sample.name)
+        canonical.append(
+            HandEyeSample(
+                name=sample.name,
+                image=sample.image,
+                joint_degrees=sample.joint_degrees,
+                base_T_gripper=sample.base_T_gripper.copy(),
+                camera_T_target=target,
+                pnp_reprojection_error_px=sample.pnp_reprojection_error_px,
+            )
+        )
+
+    scale = actual_square_size_mm / pnp_square_size_mm
+    if not np.isclose(scale, 1.0):
+        scaled: list[HandEyeSample] = []
+        for sample in canonical:
+            target = sample.camera_T_target.copy()
+            target[:3, 3] *= scale
+            scaled.append(
+                HandEyeSample(
+                    name=sample.name,
+                    image=sample.image,
+                    joint_degrees=sample.joint_degrees,
+                    base_T_gripper=sample.base_T_gripper.copy(),
+                    camera_T_target=target,
+                    pnp_reprojection_error_px=sample.pnp_reprojection_error_px,
+                )
+            )
+        canonical = scaled
+    return canonical, flipped_names
 
 
 def solve_hand_eye(samples: Sequence[HandEyeSample], method: str = "park") -> HandEyeResult:
